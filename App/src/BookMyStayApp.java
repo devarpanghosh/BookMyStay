@@ -1,19 +1,29 @@
 import java.util.*;
 
 /**
- * --- BOOK MY STAY APP: FULL SYSTEM INTEGRATION ---
- * This final version implements the complete lifecycle:
- * 1. Entry Point & Domain (UC 1, 2)
- * 2. Centralized HashMap Inventory (UC 3)
- * 3. Read-Only Search (UC 4)
- * 4. FIFO Request Queueing (UC 5)
- * 5. Atomic Room ID Assignment (UC 6)
- * 6. Add-On Service Composition (UC 7)
- * 7. Historical Reporting (UC 8)
+ * --- BOOK MY STAY APP: FINAL ROBUST INTEGRATION ---
+ * This version adds Use Case 9: Structured Validation & Error Handling.
+ * Key Concept: Fail-Fast Design via Custom Exceptions.
  */
 
 // ==========================================
-// 1. DOMAIN LAYER (Abstraction & Inheritance)
+// 1. CUSTOM EXCEPTIONS (Use Case 9)
+// ==========================================
+
+class InvalidBookingException extends Exception {
+    public InvalidBookingException(String message) {
+        super(message);
+    }
+}
+
+class RoomUnavailableException extends Exception {
+    public RoomUnavailableException(String message) {
+        super(message);
+    }
+}
+
+// ==========================================
+// 2. DOMAIN LAYER
 // ==========================================
 
 abstract class Room {
@@ -32,116 +42,86 @@ abstract class Room {
 class SingleRoom extends Room { public SingleRoom() { super("Single", 100.0); } }
 class DoubleRoom extends Room { public DoubleRoom() { super("Double", 180.0); } }
 
-class AddOnService {
-    private String name;
-    private double cost;
-    public AddOnService(String name, double cost) { this.name = name; this.cost = cost; }
-    public String getName() { return name; }
-    public double getCost() { return cost; }
-}
-
 // ==========================================
-// 2. STATE & SERVICE LAYER
+// 3. CORE SYSTEM (Inventory & Allocation)
 // ==========================================
 
-class HotelSystem {
-    // Inventory (UC 3)
+class BookingSystem {
     private Map<String, Integer> inventory = new HashMap<>();
-    // Request Queue (UC 5)
-    private Queue<ReservationRequest> requestQueue = new LinkedList<>();
-    // Double-Booking Prevention (UC 6)
     private Map<String, Set<String>> assignedRoomIDs = new HashMap<>();
-    // Historical Tracking (UC 8)
     private List<String> bookingHistory = new ArrayList<>();
-    // Add-On Mapping (UC 7)
-    private Map<String, List<AddOnService>> reservationServices = new HashMap<>();
 
     public void addInventory(Room room, int count) {
-        inventory.put(room.getRoomType(), count);
-        assignedRoomIDs.putIfAbsent(room.getRoomType(), new HashSet<>());
-    }
-
-    public void enqueueRequest(String guest, String type) {
-        requestQueue.add(new ReservationRequest(guest, type));
+        inventory.put(room.getRoomType().toLowerCase(), count);
+        assignedRoomIDs.putIfAbsent(room.getRoomType().toLowerCase(), new HashSet<>());
     }
 
     /**
-     * Use Case 6 & 8: Processes bookings and records history.
+     * Use Case 9: Process booking with robust validation.
+     * Demonstrates Fail-Fast logic.
      */
-    public void processAllRequests() {
-        while (!requestQueue.isEmpty()) {
-            ReservationRequest req = requestQueue.poll();
-            String type = req.requestedRoomType;
-            int count = inventory.getOrDefault(type, 0);
+    public void processBooking(String guest, String type) throws InvalidBookingException, RoomUnavailableException {
+        String searchKey = type.toLowerCase();
 
-            if (count > 0) {
-                // Atomic ID Generation
-                String roomID = type.toUpperCase() + "-" + (assignedRoomIDs.get(type).size() + 101);
-                assignedRoomIDs.get(type).add(roomID);
-                inventory.put(type, count - 1);
-                reservationServices.put(roomID, new ArrayList<>());
-
-                String record = "Guest: " + req.guestName + " | Room: " + roomID;
-                bookingHistory.add(record);
-                System.out.println("[Confirmed] " + record);
-            } else {
-                System.out.println("[Failed] No rooms left for " + req.guestName);
-            }
+        // 1. Validate Input (Input Validation)
+        if (!inventory.containsKey(searchKey)) {
+            throw new InvalidBookingException("Error: Room type '" + type + "' does not exist in our catalog.");
         }
+
+        // 2. Guard System State (Constraint Check)
+        int available = inventory.get(searchKey);
+        if (available <= 0) {
+            throw new RoomUnavailableException("Error: No availability left for " + type + " rooms.");
+        }
+
+        // 3. Atomic Logic (If validation passes)
+        String roomID = type.toUpperCase() + "-" + (assignedRoomIDs.get(searchKey).size() + 101);
+        assignedRoomIDs.get(searchKey).add(roomID);
+        inventory.put(searchKey, available - 1);
+
+        bookingHistory.add("Guest: " + guest + " | Room: " + roomID);
+        System.out.println("[Confirmed] Reservation successful for " + guest + " (" + roomID + ")");
     }
 
-    public void addService(String roomID, AddOnService service) {
-        if (reservationServices.containsKey(roomID)) {
-            reservationServices.get(roomID).add(service);
-        }
-    }
-
-    /**
-     * Use Case 8: Reporting Service
-     */
     public void displayReport() {
-        System.out.println("\n--- FINAL OPERATIONAL REPORT ---");
-        System.out.println("Total Transactions: " + bookingHistory.size());
-        bookingHistory.forEach(entry -> System.out.println("History: " + entry));
-    }
-
-    // Helper class for requests
-    private static class ReservationRequest {
-        String guestName;
-        String requestedRoomType;
-        ReservationRequest(String g, String t) { this.guestName = g; this.requestedRoomType = t; }
+        System.out.println("\n--- SYSTEM AUDIT REPORT ---");
+        if (bookingHistory.isEmpty()) System.out.println("No confirmed bookings.");
+        bookingHistory.forEach(System.out::println);
+        System.out.println("---------------------------\n");
     }
 }
 
 // ==========================================
-// 3. APPLICATION ENTRY POINT
+// 4. APPLICATION ENTRY POINT
 // ==========================================
 
 public class BookMyStayApp {
     public static void main(String[] args) {
-        // UC 1: Metadata
-        System.out.println("Welcome to Book My Stay App v1.8\n");
+        System.out.println("BOOK MY STAY v1.9 - Robust Validation System\n");
 
-        HotelSystem hotel = new HotelSystem();
+        BookingSystem hotel = new BookingSystem();
+        hotel.addInventory(new SingleRoom(), 1); // Only 1 Single room available
 
-        // UC 2 & 3: Initialization
-        hotel.addInventory(new SingleRoom(), 1);
-        hotel.addInventory(new DoubleRoom(), 5);
+        // Array of test scenarios: Valid, Invalid Type, and Out of Stock
+        String[][] testRequests = {
+                {"Alice", "Single"},   // Valid
+                {"Bob", "Penthouse"},  // Invalid Type (Triggers InvalidBookingException)
+                {"Charlie", "Single"}  // Out of Stock (Triggers RoomUnavailableException)
+        };
 
-        // UC 5: Fair Queueing
-        hotel.enqueueRequest("Alice", "Single");
-        hotel.enqueueRequest("Bob", "Single"); // Should fail (only 1 single room)
+        for (String[] req : testRequests) {
+            try {
+                System.out.println("[Request] Guest: " + req[0] + " | Type: " + req[1]);
+                hotel.processBooking(req[0], req[1]);
+            } catch (InvalidBookingException | RoomUnavailableException e) {
+                // Graceful Failure Handling
+                System.err.println(">> FAILURE: " + e.getMessage());
+            } catch (Exception e) {
+                System.err.println(">> UNEXPECTED ERROR: " + e.getMessage());
+            }
+        }
 
-        // UC 6: Atomic Allocation
-        hotel.processAllRequests();
-
-        // UC 7: Optional Services
-        // Assuming we knew the ID from output (e.g., SINGLE-101)
-        hotel.addService("SINGLE-101", new AddOnService("Late Checkout", 20.0));
-
-        // UC 8: Reporting
         hotel.displayReport();
-
-        System.out.println("\n[Shutdown] System execution finished.");
+        System.out.println("System execution completed safely.");
     }
 }
