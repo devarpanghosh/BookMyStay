@@ -1,28 +1,97 @@
 /**
- * The HotelBookingApp class serves as the entry point for the Book My Stay application.
- * This class demonstrates the basic setup of a Java application, including the
- * main method, console output, and documentation practices.
+ * Book My Stay App - Hotel Booking Management System
+ * * This class represents the entry point and demonstrates:
+ * 1. Application Metadata (Use Case 1)
+ * 2. Inheritance & Abstraction (Use Case 2)
+ * 3. Encapsulation & Polymorphism (Use Case 2)
  * * @author [Your Name]
- * @version 1.0
+ * @version 1.1
  */
+
+// --- DOMAIN MODEL ---
+
+/**
+ * Abstract class representing a generalized Room.
+ */
+abstract class Room {
+    private String roomType;
+    private int numberOfBeds;
+    private double pricePerNight;
+
+    public Room(String roomType, int numberOfBeds, double pricePerNight) {
+        this.roomType = roomType;
+        this.numberOfBeds = numberOfBeds;
+        this.pricePerNight = pricePerNight;
+    }
+
+    /**
+     * Prints room characteristics to the console.
+     */
+    public void displayDetails() {
+        System.out.println("Room Type       : " + roomType);
+        System.out.println("Number of Beds  : " + numberOfBeds);
+        System.out.println("Price per Night : $" + pricePerNight);
+    }
+}
+
+/**
+ * Concrete implementations of the Room class.
+ */
+class SingleRoom extends Room {
+    public SingleRoom() { super("Single Room", 1, 100.0); }
+}
+
+class DoubleRoom extends Room {
+    public DoubleRoom() { super("Double Room", 2, 180.0); }
+}
+
+class SuiteRoom extends Room {
+    public SuiteRoom() { super("Suite Room", 4, 350.0); }
+}
+
+// --- MAIN APPLICATION ENTRY POINT ---
+
 public class BookMyStayApp {
 
     /**
-     * The main method is the entry point where the JVM starts program execution.
-     * It follows a linear execution flow to display a welcome message.
-     * * @param args Command-line arguments (not used in this version).
+     * JVM invokes this method to start the application.
      */
     public static void main(String[] args) {
 
-        // Use Case 1: Application Entry & Welcome Message
+        // --- USE CASE 1: Welcome & Metadata ---
+        System.out.println("========================================");
+        System.out.println("   Welcome to BOOK MY STAY App          ");
+        System.out.println("   System: Hotel Booking Management     ");
+        System.out.println("   Version: 1.1                         ");
+        System.out.println("========================================\n");
 
-        // Print the welcome message to the console
-        System.out.println("Welcome to the Book My Stay Application!");
+        // --- USE CASE 2: Domain Logic & State ---
 
-        // Display the application name and version information
-        System.out.println("Application Name: Hotel Booking Management System");
-        System.out.println("Version: 1.0");
+        // 1. Initialize Room Objects (Polymorphism)
+        Room single = new SingleRoom();
+        Room doubleRm = new DoubleRoom();
+        Room suite = new SuiteRoom();
 
-        // The program terminates naturally after this point
+        // 2. Static Availability Representation (State Management)
+        int singleRoomAvailability = 10;
+        int doubleRoomAvailability = 5;
+        int suiteRoomAvailability = 2;
+
+        // 3. Display Room Details and Inventory State
+        System.out.println("--- Current Room Inventory ---");
+
+        single.displayDetails();
+        System.out.println("Current Availability: " + singleRoomAvailability);
+        System.out.println("----------------------------------------");
+
+        doubleRm.displayDetails();
+        System.out.println("Current Availability: " + doubleRoomAvailability);
+        System.out.println("----------------------------------------");
+
+        suite.displayDetails();
+        System.out.println("Current Availability: " + suiteRoomAvailability);
+        System.out.println("----------------------------------------");
+
+        System.out.println("\nApplication execution completed successfully.");
     }
 }
