@@ -1,13 +1,19 @@
 import java.util.*;
 
 /**
- * --- BOOK MY STAY APP: FULL BUSINESS MODEL ---
- * Integrates: Inheritance, HashMaps, Queues, Sets, and Add-On Services.
- * * @version 1.7 (Final Extensible Version)
+ * --- BOOK MY STAY APP: FULL SYSTEM INTEGRATION ---
+ * This final version implements the complete lifecycle:
+ * 1. Entry Point & Domain (UC 1, 2)
+ * 2. Centralized HashMap Inventory (UC 3)
+ * 3. Read-Only Search (UC 4)
+ * 4. FIFO Request Queueing (UC 5)
+ * 5. Atomic Room ID Assignment (UC 6)
+ * 6. Add-On Service Composition (UC 7)
+ * 7. Historical Reporting (UC 8)
  */
 
 // ==========================================
-// 1. DOMAIN LAYER
+// 1. DOMAIN LAYER (Abstraction & Inheritance)
 // ==========================================
 
 abstract class Room {
@@ -26,89 +32,84 @@ abstract class Room {
 class SingleRoom extends Room { public SingleRoom() { super("Single", 100.0); } }
 class DoubleRoom extends Room { public DoubleRoom() { super("Double", 180.0); } }
 
-/**
- * Use Case 7: Add-On Service Model
- */
 class AddOnService {
-    private String serviceName;
+    private String name;
     private double cost;
-
-    public AddOnService(String serviceName, double cost) {
-        this.serviceName = serviceName;
-        this.cost = cost;
-    }
-
-    public String getServiceName() { return serviceName; }
+    public AddOnService(String name, double cost) { this.name = name; this.cost = cost; }
+    public String getName() { return name; }
     public double getCost() { return cost; }
 }
 
 // ==========================================
-// 2. SERVICE LAYER (Inventory & Allocation)
+// 2. STATE & SERVICE LAYER
 // ==========================================
 
-class BookingManager {
+class HotelSystem {
+    // Inventory (UC 3)
     private Map<String, Integer> inventory = new HashMap<>();
-    private Queue<String> requestQueue = new LinkedList<>();
-
-    // Use Case 6: Atomic Allocation tracking
+    // Request Queue (UC 5)
+    private Queue<ReservationRequest> requestQueue = new LinkedList<>();
+    // Double-Booking Prevention (UC 6)
     private Map<String, Set<String>> assignedRoomIDs = new HashMap<>();
+    // Historical Tracking (UC 8)
+    private List<String> bookingHistory = new ArrayList<>();
+    // Add-On Mapping (UC 7)
+    private Map<String, List<AddOnService>> reservationServices = new HashMap<>();
 
-    // Use Case 7: One-to-Many Relationship (Reservation ID -> List of Services)
-    private Map<String, List<AddOnService>> reservationAddOns = new HashMap<>();
-
-    public void setupInventory(Room room, int count) {
+    public void addInventory(Room room, int count) {
         inventory.put(room.getRoomType(), count);
         assignedRoomIDs.putIfAbsent(room.getRoomType(), new HashSet<>());
     }
 
-    /**
-     * Use Case 6 & 7: Allocates room and initializes add-on list
-     */
-    public String processBooking(String guestName, String roomType) {
-        int available = inventory.getOrDefault(roomType, 0);
-
-        if (available > 0) {
-            String resID = roomType.toUpperCase() + "-" + (assignedRoomIDs.get(roomType).size() + 101);
-            assignedRoomIDs.get(roomType).add(resID);
-            inventory.put(roomType, available - 1);
-
-            // Initialize empty add-on list for this reservation
-            reservationAddOns.put(resID, new ArrayList<>());
-
-            System.out.println("[System] Confirmed: " + guestName + " assigned to " + resID);
-            return resID;
-        }
-        System.out.println("[System] Failed: No availability for " + roomType);
-        return null;
+    public void enqueueRequest(String guest, String type) {
+        requestQueue.add(new ReservationRequest(guest, type));
     }
 
     /**
-     * Use Case 7: Attaches services to a reservation
+     * Use Case 6 & 8: Processes bookings and records history.
      */
-    public void addServiceToReservation(String resID, AddOnService service) {
-        if (reservationAddOns.containsKey(resID)) {
-            reservationAddOns.get(resID).add(service);
-            System.out.println("[Service] Added " + service.getServiceName() + " to " + resID);
+    public void processAllRequests() {
+        while (!requestQueue.isEmpty()) {
+            ReservationRequest req = requestQueue.poll();
+            String type = req.requestedRoomType;
+            int count = inventory.getOrDefault(type, 0);
+
+            if (count > 0) {
+                // Atomic ID Generation
+                String roomID = type.toUpperCase() + "-" + (assignedRoomIDs.get(type).size() + 101);
+                assignedRoomIDs.get(type).add(roomID);
+                inventory.put(type, count - 1);
+                reservationServices.put(roomID, new ArrayList<>());
+
+                String record = "Guest: " + req.guestName + " | Room: " + roomID;
+                bookingHistory.add(record);
+                System.out.println("[Confirmed] " + record);
+            } else {
+                System.out.println("[Failed] No rooms left for " + req.guestName);
+            }
+        }
+    }
+
+    public void addService(String roomID, AddOnService service) {
+        if (reservationServices.containsKey(roomID)) {
+            reservationServices.get(roomID).add(service);
         }
     }
 
     /**
-     * Use Case 7: Cost Aggregation logic
+     * Use Case 8: Reporting Service
      */
-    public void generateInvoice(String resID, double basePrice) {
-        System.out.println("\n--- INVOICE FOR " + resID + " ---");
-        System.out.printf("Base Room Price: $%.2f%n", basePrice);
+    public void displayReport() {
+        System.out.println("\n--- FINAL OPERATIONAL REPORT ---");
+        System.out.println("Total Transactions: " + bookingHistory.size());
+        bookingHistory.forEach(entry -> System.out.println("History: " + entry));
+    }
 
-        double totalAddOnCost = 0;
-        List<AddOnService> services = reservationAddOns.getOrDefault(resID, new ArrayList<>());
-
-        for (AddOnService s : services) {
-            System.out.printf("+ %-10s: $%.2f%n", s.getServiceName(), s.getCost());
-            totalAddOnCost += s.getCost();
-        }
-
-        System.out.println("---------------------------");
-        System.out.printf("TOTAL BILL: $%.2f%n", (basePrice + totalAddOnCost));
+    // Helper class for requests
+    private static class ReservationRequest {
+        String guestName;
+        String requestedRoomType;
+        ReservationRequest(String g, String t) { this.guestName = g; this.requestedRoomType = t; }
     }
 }
 
@@ -118,26 +119,29 @@ class BookingManager {
 
 public class BookMyStayApp {
     public static void main(String[] args) {
-        System.out.println("BOOK MY STAY - VERSION 1.7 (Full Business Logic)\n");
+        // UC 1: Metadata
+        System.out.println("Welcome to Book My Stay App v1.8\n");
 
-        BookingManager manager = new BookingManager();
+        HotelSystem hotel = new HotelSystem();
 
-        // 1. Setup
-        Room single = new SingleRoom();
-        manager.setupInventory(single, 5);
+        // UC 2 & 3: Initialization
+        hotel.addInventory(new SingleRoom(), 1);
+        hotel.addInventory(new DoubleRoom(), 5);
 
-        // 2. Execution Flow (Booking -> Add-Ons -> Invoice)
-        String myResID = manager.processBooking("Alice", "Single");
+        // UC 5: Fair Queueing
+        hotel.enqueueRequest("Alice", "Single");
+        hotel.enqueueRequest("Bob", "Single"); // Should fail (only 1 single room)
 
-        if (myResID != null) {
-            // Guest selects optional services
-            manager.addServiceToReservation(myResID, new AddOnService("Breakfast", 15.0));
-            manager.addServiceToReservation(myResID, new AddOnService("WiFi", 10.0));
+        // UC 6: Atomic Allocation
+        hotel.processAllRequests();
 
-            // Final Bill Calculation
-            manager.generateInvoice(myResID, single.getPrice());
-        }
+        // UC 7: Optional Services
+        // Assuming we knew the ID from output (e.g., SINGLE-101)
+        hotel.addService("SINGLE-101", new AddOnService("Late Checkout", 20.0));
 
-        System.out.println("\nSystem state consistent. Core logic preserved.");
+        // UC 8: Reporting
+        hotel.displayReport();
+
+        System.out.println("\n[Shutdown] System execution finished.");
     }
 }
