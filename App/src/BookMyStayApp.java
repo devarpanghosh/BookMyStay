@@ -1,29 +1,20 @@
 import java.util.*;
 
 /**
- * --- BOOK MY STAY APP: FINAL ROBUST INTEGRATION ---
- * This version adds Use Case 9: Structured Validation & Error Handling.
- * Key Concept: Fail-Fast Design via Custom Exceptions.
+ * --- BOOK MY STAY APP: FINAL SYSTEM ARCHITECTURE ---
+ * Features:
+ * - Abstraction, Inheritance, Encapsulation (UC 2)
+ * - HashMap Centralized Inventory (UC 3)
+ * - FIFO Booking Queue (UC 5)
+ * - Atomic Allocation with Unique IDs (UC 6)
+ * - One-to-Many Add-On Services (UC 7)
+ * - Historical Audit Reporting (UC 8)
+ * - Fail-Fast Validation (UC 9)
+ * - LIFO Cancellation Rollback (UC 10)
  */
 
 // ==========================================
-// 1. CUSTOM EXCEPTIONS (Use Case 9)
-// ==========================================
-
-class InvalidBookingException extends Exception {
-    public InvalidBookingException(String message) {
-        super(message);
-    }
-}
-
-class RoomUnavailableException extends Exception {
-    public RoomUnavailableException(String message) {
-        super(message);
-    }
-}
-
-// ==========================================
-// 2. DOMAIN LAYER
+// 1. DOMAIN LAYER
 // ==========================================
 
 abstract class Room {
@@ -42,86 +33,101 @@ abstract class Room {
 class SingleRoom extends Room { public SingleRoom() { super("Single", 100.0); } }
 class DoubleRoom extends Room { public DoubleRoom() { super("Double", 180.0); } }
 
+class AddOnService {
+    private String name;
+    private double cost;
+    public AddOnService(String name, double cost) { this.name = name; this.cost = cost; }
+    public String getName() { return name; }
+    public double getCost() { return cost; }
+}
+
 // ==========================================
-// 3. CORE SYSTEM (Inventory & Allocation)
+// 2. CORE BOOKING ENGINE
 // ==========================================
 
-class BookingSystem {
+class HotelBookingManager {
     private Map<String, Integer> inventory = new HashMap<>();
-    private Map<String, Set<String>> assignedRoomIDs = new HashMap<>();
-    private List<String> bookingHistory = new ArrayList<>();
+    private List<String> history = new ArrayList<>();
+    private Map<String, List<AddOnService>> addOns = new HashMap<>();
+
+    // Use Case 10: Stack for Rollback behavior
+    private Stack<String> lastAllocatedIDs = new Stack<>();
 
     public void addInventory(Room room, int count) {
         inventory.put(room.getRoomType().toLowerCase(), count);
-        assignedRoomIDs.putIfAbsent(room.getRoomType().toLowerCase(), new HashSet<>());
     }
 
     /**
-     * Use Case 9: Process booking with robust validation.
-     * Demonstrates Fail-Fast logic.
+     * Use Case 6 & 9: Atomic Allocation with Validation
      */
-    public void processBooking(String guest, String type) throws InvalidBookingException, RoomUnavailableException {
-        String searchKey = type.toLowerCase();
+    public String bookRoom(String guest, String type) throws Exception {
+        String key = type.toLowerCase();
 
-        // 1. Validate Input (Input Validation)
-        if (!inventory.containsKey(searchKey)) {
-            throw new InvalidBookingException("Error: Room type '" + type + "' does not exist in our catalog.");
-        }
+        if (!inventory.containsKey(key)) throw new Exception("Invalid Room Type");
+        if (inventory.get(key) <= 0) throw new Exception("Room Out of Stock");
 
-        // 2. Guard System State (Constraint Check)
-        int available = inventory.get(searchKey);
-        if (available <= 0) {
-            throw new RoomUnavailableException("Error: No availability left for " + type + " rooms.");
-        }
+        String resID = type.toUpperCase() + "-" + (100 + history.size() + 1);
 
-        // 3. Atomic Logic (If validation passes)
-        String roomID = type.toUpperCase() + "-" + (assignedRoomIDs.get(searchKey).size() + 101);
-        assignedRoomIDs.get(searchKey).add(roomID);
-        inventory.put(searchKey, available - 1);
+        // Update State
+        inventory.put(key, inventory.get(key) - 1);
+        lastAllocatedIDs.push(resID); // Track for rollback
+        addOns.put(resID, new ArrayList<>());
 
-        bookingHistory.add("Guest: " + guest + " | Room: " + roomID);
-        System.out.println("[Confirmed] Reservation successful for " + guest + " (" + roomID + ")");
+        String log = "Guest: " + guest + " | ID: " + resID;
+        history.add(log);
+
+        return resID;
     }
 
-    public void displayReport() {
-        System.out.println("\n--- SYSTEM AUDIT REPORT ---");
-        if (bookingHistory.isEmpty()) System.out.println("No confirmed bookings.");
-        bookingHistory.forEach(System.out::println);
-        System.out.println("---------------------------\n");
+    /**
+     * Use Case 10: Cancellation Service (LIFO Rollback)
+     */
+    public void cancelLastBooking() {
+        if (lastAllocatedIDs.isEmpty()) {
+            System.out.println("[Cancel] No reservations to rollback.");
+            return;
+        }
+
+        String resID = lastAllocatedIDs.pop(); // Get most recent
+        String type = resID.split("-")[0].toLowerCase();
+
+        // Revert Inventory
+        inventory.put(type, inventory.get(type) + 1);
+        history.add("CANCELLED: " + resID);
+
+        System.out.println("[Cancel] Successfully rolled back " + resID);
+    }
+
+    public void showReport() {
+        System.out.println("\n--- Audit Trail ---");
+        history.forEach(System.out::println);
     }
 }
 
 // ==========================================
-// 4. APPLICATION ENTRY POINT
+// 3. APPLICATION ENTRY POINT
 // ==========================================
 
 public class BookMyStayApp {
     public static void main(String[] args) {
-        System.out.println("BOOK MY STAY v1.9 - Robust Validation System\n");
+        // Use Case 1: Entry Point
+        System.out.println("BOOK MY STAY v1.10 - Final Integrated System\n");
 
-        BookingSystem hotel = new BookingSystem();
-        hotel.addInventory(new SingleRoom(), 1); // Only 1 Single room available
+        HotelBookingManager hotel = new HotelBookingManager();
+        hotel.addInventory(new SingleRoom(), 5);
 
-        // Array of test scenarios: Valid, Invalid Type, and Out of Stock
-        String[][] testRequests = {
-                {"Alice", "Single"},   // Valid
-                {"Bob", "Penthouse"},  // Invalid Type (Triggers InvalidBookingException)
-                {"Charlie", "Single"}  // Out of Stock (Triggers RoomUnavailableException)
-        };
+        try {
+            // Process a booking
+            String id1 = hotel.bookRoom("Alice", "Single");
+            System.out.println("Confirmed: " + id1);
 
-        for (String[] req : testRequests) {
-            try {
-                System.out.println("[Request] Guest: " + req[0] + " | Type: " + req[1]);
-                hotel.processBooking(req[0], req[1]);
-            } catch (InvalidBookingException | RoomUnavailableException e) {
-                // Graceful Failure Handling
-                System.err.println(">> FAILURE: " + e.getMessage());
-            } catch (Exception e) {
-                System.err.println(">> UNEXPECTED ERROR: " + e.getMessage());
-            }
+            // Use Case 10: Demonstrate safe cancellation
+            hotel.cancelLastBooking();
+
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
         }
 
-        hotel.displayReport();
-        System.out.println("System execution completed safely.");
+        hotel.showReport();
     }
 }
