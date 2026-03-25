@@ -1,133 +1,137 @@
 import java.util.*;
+import java.util.concurrent.*;
 
 /**
- * --- BOOK MY STAY APP: FINAL SYSTEM ARCHITECTURE ---
- * Features:
- * - Abstraction, Inheritance, Encapsulation (UC 2)
- * - HashMap Centralized Inventory (UC 3)
- * - FIFO Booking Queue (UC 5)
- * - Atomic Allocation with Unique IDs (UC 6)
- * - One-to-Many Add-On Services (UC 7)
- * - Historical Audit Reporting (UC 8)
- * - Fail-Fast Validation (UC 9)
- * - LIFO Cancellation Rollback (UC 10)
+ * --- BOOK MY STAY APP: FINAL ROBUST & CONCURRENT VERSION ---
+ * This version integrates Use Case 11: Multi-threaded Synchronization.
+ * Key Concept: Thread Safety and Critical Sections to prevent Double Allocation.
  */
 
 // ==========================================
-// 1. DOMAIN LAYER
+// 1. CUSTOM EXCEPTIONS
+// ==========================================
+
+class BookingException extends Exception {
+    public BookingException(String message) { super(message); }
+}
+
+// ==========================================
+// 2. DOMAIN LAYER
 // ==========================================
 
 abstract class Room {
-    private String roomType;
-    private double pricePerNight;
+    private String type;
+    private double price;
 
-    public Room(String roomType, double pricePerNight) {
-        this.roomType = roomType;
-        this.pricePerNight = pricePerNight;
+    public Room(String type, double price) {
+        this.type = type;
+        this.price = price;
     }
 
-    public String getRoomType() { return roomType; }
-    public double getPrice() { return pricePerNight; }
+    public String getType() { return type; }
+    public double getPrice() { return price; }
 }
 
 class SingleRoom extends Room { public SingleRoom() { super("Single", 100.0); } }
 class DoubleRoom extends Room { public DoubleRoom() { super("Double", 180.0); } }
 
-class AddOnService {
-    private String name;
-    private double cost;
-    public AddOnService(String name, double cost) { this.name = name; this.cost = cost; }
-    public String getName() { return name; }
-    public double getCost() { return cost; }
-}
-
 // ==========================================
-// 2. CORE BOOKING ENGINE
+// 3. CORE CONCURRENT SYSTEM
 // ==========================================
 
-class HotelBookingManager {
-    private Map<String, Integer> inventory = new HashMap<>();
-    private List<String> history = new ArrayList<>();
-    private Map<String, List<AddOnService>> addOns = new HashMap<>();
+class HotelSystem {
+    // Shared Mutable State
+    private final Map<String, Integer> inventory = new ConcurrentHashMap<>();
+    private final Map<String, Set<String>> allocatedIDs = new ConcurrentHashMap<>();
+    private final List<String> auditTrail = Collections.synchronizedList(new ArrayList<>());
 
-    // Use Case 10: Stack for Rollback behavior
-    private Stack<String> lastAllocatedIDs = new Stack<>();
+    // Stack for LIFO Rollback (UC 10)
+    private final Stack<String> rollbackStack = new Stack<>();
 
-    public void addInventory(Room room, int count) {
-        inventory.put(room.getRoomType().toLowerCase(), count);
+    public void initializeInventory(Room room, int count) {
+        inventory.put(room.getType().toLowerCase(), count);
+        allocatedIDs.put(room.getType().toLowerCase(), ConcurrentHashMap.newKeySet());
     }
 
     /**
-     * Use Case 6 & 9: Atomic Allocation with Validation
+     * Use Case 11: Synchronized Room Allocation
+     * Uses a synchronized block to create a 'Critical Section'.
      */
-    public String bookRoom(String guest, String type) throws Exception {
+    public String processConcurrentBooking(String guest, String type) throws BookingException {
         String key = type.toLowerCase();
 
-        if (!inventory.containsKey(key)) throw new Exception("Invalid Room Type");
-        if (inventory.get(key) <= 0) throw new Exception("Room Out of Stock");
+        // Critical Section: Only one thread can execute this block at a time
+        synchronized (this) {
+            if (!inventory.containsKey(key)) {
+                throw new BookingException("Invalid Room Type: " + type); // UC 9
+            }
 
-        String resID = type.toUpperCase() + "-" + (100 + history.size() + 1);
+            int currentCount = inventory.get(key);
+            if (currentCount <= 0) {
+                throw new BookingException("Sold Out: " + type); // UC 9
+            }
 
-        // Update State
-        inventory.put(key, inventory.get(key) - 1);
-        lastAllocatedIDs.push(resID); // Track for rollback
-        addOns.put(resID, new ArrayList<>());
+            // Atomic Updates to prevent Race Conditions
+            String roomID = type.toUpperCase() + "-" + (101 + allocatedIDs.get(key).size());
+            inventory.put(key, currentCount - 1);
+            allocatedIDs.get(key).add(roomID);
+            rollbackStack.push(roomID);
 
-        String log = "Guest: " + guest + " | ID: " + resID;
-        history.add(log);
-
-        return resID;
+            String entry = "[SUCCESS] Guest: " + guest + " | Room: " + roomID;
+            auditTrail.add(entry);
+            return roomID;
+        }
     }
 
     /**
-     * Use Case 10: Cancellation Service (LIFO Rollback)
+     * Use Case 10: Safe State Reversal
      */
-    public void cancelLastBooking() {
-        if (lastAllocatedIDs.isEmpty()) {
-            System.out.println("[Cancel] No reservations to rollback.");
-            return;
+    public synchronized void rollbackLastBooking() {
+        if (!rollbackStack.isEmpty()) {
+            String resID = rollbackStack.pop();
+            String type = resID.split("-")[0].toLowerCase();
+            inventory.put(type, inventory.get(type) + 1);
+            auditTrail.add("[ROLLBACK] Cancelled: " + resID);
+            System.out.println("System Restored: " + resID + " returned to inventory.");
         }
-
-        String resID = lastAllocatedIDs.pop(); // Get most recent
-        String type = resID.split("-")[0].toLowerCase();
-
-        // Revert Inventory
-        inventory.put(type, inventory.get(type) + 1);
-        history.add("CANCELLED: " + resID);
-
-        System.out.println("[Cancel] Successfully rolled back " + resID);
     }
 
-    public void showReport() {
-        System.out.println("\n--- Audit Trail ---");
-        history.forEach(System.out::println);
+    public void printFinalReport() {
+        System.out.println("\n--- FINAL OPERATIONAL REPORT ---");
+        auditTrail.forEach(System.out::println);
+        System.out.println("--------------------------------");
     }
 }
 
 // ==========================================
-// 3. APPLICATION ENTRY POINT
+// 4. MULTI-THREADED SIMULATION
 // ==========================================
 
 public class BookMyStayApp {
-    public static void main(String[] args) {
-        // Use Case 1: Entry Point
-        System.out.println("BOOK MY STAY v1.10 - Final Integrated System\n");
+    public static void main(String[] args) throws InterruptedException {
+        System.out.println("BOOK MY STAY v1.11 - Concurrent System Running...\n");
 
-        HotelBookingManager hotel = new HotelBookingManager();
-        hotel.addInventory(new SingleRoom(), 5);
+        HotelSystem hotel = new HotelSystem();
+        hotel.initializeInventory(new SingleRoom(), 2); // Only 2 rooms for 3 guests
 
-        try {
-            // Process a booking
-            String id1 = hotel.bookRoom("Alice", "Single");
-            System.out.println("Confirmed: " + id1);
+        // Use Case 11: Simulate Concurrent Guests
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        String[] guests = {"Alice", "Bob", "Charlie"};
 
-            // Use Case 10: Demonstrate safe cancellation
-            hotel.cancelLastBooking();
-
-        } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
+        for (String guest : guests) {
+            executor.execute(() -> {
+                try {
+                    String id = hotel.processConcurrentBooking(guest, "Single");
+                    System.out.println("Guest " + guest + " confirmed: " + id);
+                } catch (BookingException e) {
+                    System.err.println("Guest " + guest + " failed: " + e.getMessage());
+                }
+            });
         }
 
-        hotel.showReport();
+        executor.shutdown();
+        executor.awaitTermination(5, TimeUnit.SECONDS);
+
+        hotel.printFinalReport();
     }
 }
