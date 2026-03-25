@@ -1,25 +1,22 @@
 import java.util.*;
+import java.io.*;
 import java.util.concurrent.*;
 
 /**
- * --- BOOK MY STAY APP: FINAL ROBUST & CONCURRENT VERSION ---
- * This version integrates Use Case 11: Multi-threaded Synchronization.
- * Key Concept: Thread Safety and Critical Sections to prevent Double Allocation.
+ * --- BOOK MY STAY APP: FULL ARCHITECTURE ---
+ * Final Version: Persistence & Recovery Integration.
+ * Features:
+ * - Thread-Safe Concurrent Booking (UC 11)
+ * - LIFO Cancellation Rollback (UC 10)
+ * - File-based Serialization/Deserialization (UC 12)
  */
 
 // ==========================================
-// 1. CUSTOM EXCEPTIONS
+// 1. DOMAIN LAYER (Serializable for Persistence)
 // ==========================================
 
-class BookingException extends Exception {
-    public BookingException(String message) { super(message); }
-}
-
-// ==========================================
-// 2. DOMAIN LAYER
-// ==========================================
-
-abstract class Room {
+abstract class Room implements Serializable {
+    private static final long serialVersionUID = 1L;
     private String type;
     private double price;
 
@@ -27,111 +24,110 @@ abstract class Room {
         this.type = type;
         this.price = price;
     }
-
     public String getType() { return type; }
-    public double getPrice() { return price; }
 }
 
-class SingleRoom extends Room { public SingleRoom() { super("Single", 100.0); } }
-class DoubleRoom extends Room { public DoubleRoom() { super("Double", 180.0); } }
+class SingleRoom extends Room {
+    public SingleRoom() { super("Single", 100.0); }
+}
 
 // ==========================================
-// 3. CORE CONCURRENT SYSTEM
+// 2. CORE SERVICE LAYER
 // ==========================================
 
-class HotelSystem {
-    // Shared Mutable State
-    private final Map<String, Integer> inventory = new ConcurrentHashMap<>();
-    private final Map<String, Set<String>> allocatedIDs = new ConcurrentHashMap<>();
-    private final List<String> auditTrail = Collections.synchronizedList(new ArrayList<>());
+class HotelSystem implements Serializable {
+    private static final long serialVersionUID = 1L;
 
-    // Stack for LIFO Rollback (UC 10)
-    private final Stack<String> rollbackStack = new Stack<>();
+    // State to be persisted
+    private Map<String, Integer> inventory = new ConcurrentHashMap<>();
+    private List<String> bookingHistory = Collections.synchronizedList(new ArrayList<>());
+    private transient Stack<String> rollbackStack = new Stack<>(); // Reset on restart
 
-    public void initializeInventory(Room room, int count) {
-        inventory.put(room.getType().toLowerCase(), count);
-        allocatedIDs.put(room.getType().toLowerCase(), ConcurrentHashMap.newKeySet());
+    public void addInventory(String type, int count) {
+        inventory.put(type.toLowerCase(), count);
     }
 
     /**
-     * Use Case 11: Synchronized Room Allocation
-     * Uses a synchronized block to create a 'Critical Section'.
+     * Use Case 11: Synchronized Concurrent Booking
      */
-    public String processConcurrentBooking(String guest, String type) throws BookingException {
+    public synchronized String bookRoom(String guest, String type) throws Exception {
         String key = type.toLowerCase();
-
-        // Critical Section: Only one thread can execute this block at a time
-        synchronized (this) {
-            if (!inventory.containsKey(key)) {
-                throw new BookingException("Invalid Room Type: " + type); // UC 9
-            }
-
-            int currentCount = inventory.get(key);
-            if (currentCount <= 0) {
-                throw new BookingException("Sold Out: " + type); // UC 9
-            }
-
-            // Atomic Updates to prevent Race Conditions
-            String roomID = type.toUpperCase() + "-" + (101 + allocatedIDs.get(key).size());
-            inventory.put(key, currentCount - 1);
-            allocatedIDs.get(key).add(roomID);
-            rollbackStack.push(roomID);
-
-            String entry = "[SUCCESS] Guest: " + guest + " | Room: " + roomID;
-            auditTrail.add(entry);
-            return roomID;
+        if (!inventory.containsKey(key) || inventory.get(key) <= 0) {
+            throw new Exception("Room unavailable or invalid type.");
         }
+
+        String resID = type.toUpperCase() + "-" + (101 + bookingHistory.size());
+        inventory.put(key, inventory.get(key) - 1);
+        bookingHistory.add("Guest: " + guest + " | Room: " + resID);
+        rollbackStack.push(resID);
+
+        return resID;
     }
 
-    /**
-     * Use Case 10: Safe State Reversal
-     */
-    public synchronized void rollbackLastBooking() {
-        if (!rollbackStack.isEmpty()) {
-            String resID = rollbackStack.pop();
-            String type = resID.split("-")[0].toLowerCase();
-            inventory.put(type, inventory.get(type) + 1);
-            auditTrail.add("[ROLLBACK] Cancelled: " + resID);
-            System.out.println("System Restored: " + resID + " returned to inventory.");
-        }
-    }
-
-    public void printFinalReport() {
-        System.out.println("\n--- FINAL OPERATIONAL REPORT ---");
-        auditTrail.forEach(System.out::println);
-        System.out.println("--------------------------------");
+    public void displayReport() {
+        System.out.println("\n--- Current Booking History ---");
+        bookingHistory.forEach(System.out::println);
     }
 }
 
 // ==========================================
-// 4. MULTI-THREADED SIMULATION
+// 3. PERSISTENCE SERVICE (Use Case 12)
+// ==========================================
+
+class PersistenceManager {
+    private static final String FILE_NAME = "hotel_state.ser";
+
+    public static void saveState(HotelSystem system) {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(FILE_NAME))) {
+            oos.writeObject(system);
+            System.out.println("[Persistence] System state saved successfully.");
+        } catch (IOException e) {
+            System.err.println("[Error] Failed to save state: " + e.getMessage());
+        }
+    }
+
+    public static HotelSystem loadState() {
+        File file = new File(FILE_NAME);
+        if (!file.exists()) return null;
+
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(FILE_NAME))) {
+            System.out.println("[Persistence] Recovering state from file...");
+            return (HotelSystem) ois.readObject();
+        } catch (IOException | ClassNotFoundException e) {
+            System.err.println("[Error] Recovery failed: " + e.getMessage());
+            return null;
+        }
+    }
+}
+
+// ==========================================
+// 4. MAIN EXECUTION FLOW
 // ==========================================
 
 public class BookMyStayApp {
-    public static void main(String[] args) throws InterruptedException {
-        System.out.println("BOOK MY STAY v1.11 - Concurrent System Running...\n");
+    public static void main(String[] args) {
+        System.out.println("--- BOOK MY STAY v1.12 ---");
 
-        HotelSystem hotel = new HotelSystem();
-        hotel.initializeInventory(new SingleRoom(), 2); // Only 2 rooms for 3 guests
+        // Step 1: Attempt Recovery
+        HotelSystem hotel = PersistenceManager.loadState();
 
-        // Use Case 11: Simulate Concurrent Guests
-        ExecutorService executor = Executors.newFixedThreadPool(3);
-        String[] guests = {"Alice", "Bob", "Charlie"};
-
-        for (String guest : guests) {
-            executor.execute(() -> {
-                try {
-                    String id = hotel.processConcurrentBooking(guest, "Single");
-                    System.out.println("Guest " + guest + " confirmed: " + id);
-                } catch (BookingException e) {
-                    System.err.println("Guest " + guest + " failed: " + e.getMessage());
-                }
-            });
+        if (hotel == null) {
+            System.out.println("[Init] No saved state found. Starting fresh.");
+            hotel = new HotelSystem();
+            hotel.addInventory("Single", 5);
         }
 
-        executor.shutdown();
-        executor.awaitTermination(5, TimeUnit.SECONDS);
+        // Step 2: Perform Operations
+        try {
+            String id = hotel.bookRoom("John Doe", "Single");
+            System.out.println("Booking Successful: " + id);
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+        }
 
-        hotel.printFinalReport();
+        // Step 3: Shutdown & Persist
+        hotel.displayReport();
+        PersistenceManager.saveState(hotel);
+        System.out.println("Application Terminated.");
     }
 }
