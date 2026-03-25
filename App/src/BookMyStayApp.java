@@ -1,11 +1,14 @@
 import java.util.*;
 
 /**
- * --- BOOK MY STAY APP: BOOKING QUEUE INTEGRATION ---
+ * --- BOOK MY STAY APP: FINAL INTEGRATED VERSION ---
  * Features:
- * 1. Queue Data Structure: Uses a LinkedList (as a Queue) to store requests.
- * 2. FIFO Principle: Ensures the earliest request is processed first.
- * 3. Decoupling: Separates request intake from inventory mutation.
+ * 1. Abstraction & Inheritance (Room Domain)
+ * 2. Centralized Inventory (HashMap State)
+ * 3. Read-Only Search (Safe Data Access)
+ * 4. Request Queue (FIFO Fairness)
+ * 5. Atomic Allocation (Sets for Double-Booking Prevention)
+ * * @version 1.6 (Final)
  */
 
 // ==========================================
@@ -22,14 +25,15 @@ abstract class Room {
     }
 
     public String getRoomType() { return roomType; }
+
+    public void displayDetails() {
+        System.out.printf("Type: %-10s | Price: $%.2f%n", roomType, pricePerNight);
+    }
 }
 
 class SingleRoom extends Room { public SingleRoom() { super("Single", 100.0); } }
 class DoubleRoom extends Room { public DoubleRoom() { super("Double", 180.0); } }
 
-/**
- * Represents a Guest's intent to book a room.
- */
 class ReservationRequest {
     private String guestName;
     private String requestedRoomType;
@@ -39,50 +43,61 @@ class ReservationRequest {
         this.requestedRoomType = requestedRoomType;
     }
 
-    @Override
-    public String toString() {
-        return "Request [Guest: " + guestName + ", Room: " + requestedRoomType + "]";
-    }
+    public String getGuestName() { return guestName; }
+    public String getRequestedRoomType() { return requestedRoomType; }
 }
 
 // ==========================================
-// 2. SERVICE LAYER (Booking Queue)
+// 2. SERVICE LAYER (Inventory & Allocation)
 // ==========================================
 
-/**
- * Manages the intake and ordering of incoming booking requests.
- */
-class BookingQueue {
-    // Using Queue interface with LinkedList for FIFO behavior
+class BookingSystem {
+    private Map<String, Integer> inventory = new HashMap<>();
     private Queue<ReservationRequest> requestQueue = new LinkedList<>();
 
-    /**
-     * Adds a new request to the end of the queue.
-     */
-    public void submitRequest(ReservationRequest request) {
+    // Use Case 6: Tracking assigned IDs to prevent double-booking
+    // Maps Room Type -> Set of Unique Room IDs
+    private Map<String, Set<String>> assignedRooms = new HashMap<>();
+
+    public void addInventory(Room room, int count) {
+        inventory.put(room.getRoomType(), count);
+        assignedRooms.putIfAbsent(room.getRoomType(), new HashSet<>());
+    }
+
+    public void enqueueRequest(ReservationRequest request) {
         requestQueue.add(request);
-        System.out.println("Enqueued: " + request);
+        System.out.println("[Queue] Added request for: " + request.getGuestName());
     }
 
     /**
-     * Displays all pending requests in the order they arrived.
+     * Processes the next request in FIFO order with Atomic Allocation logic.
      */
-    public void displayQueue() {
-        System.out.println("\n--- Current Booking Queue (FIFO) ---");
-        if (requestQueue.isEmpty()) {
-            System.out.println("No pending requests.");
+    public void processNextBooking() {
+        ReservationRequest request = requestQueue.poll();
+        if (request == null) return;
+
+        String type = request.getRequestedRoomType();
+        int available = inventory.getOrDefault(type, 0);
+
+        System.out.println("\n[Processing] Guest: " + request.getGuestName() + " for " + type);
+
+        if (available > 0) {
+            // Atomic Operation: Generate ID, Record it, and Decrement Inventory
+            String roomID = type.toUpperCase() + "-" + (100 + assignedRooms.get(type).size() + 1);
+
+            assignedRooms.get(type).add(roomID); // Prevents reuse of ID
+            inventory.put(type, available - 1);  // Decrement immediately
+
+            System.out.println(">> SUCCESS: Reservation Confirmed.");
+            System.out.println(">> Assigned Room ID: " + roomID);
         } else {
-            for (ReservationRequest req : requestQueue) {
-                System.out.println(" >> " + req);
-            }
+            System.out.println(">> FAILED: No " + type + " rooms available.");
         }
     }
 
-    /**
-     * Retrieves the next request to be processed (removes from head).
-     */
-    public ReservationRequest processNext() {
-        return requestQueue.poll();
+    public void displayStatus() {
+        System.out.println("\n--- Current System State ---");
+        inventory.forEach((type, count) -> System.out.println(type + " Available: " + count));
     }
 }
 
@@ -91,31 +106,26 @@ class BookingQueue {
 // ==========================================
 
 public class BookMyStayApp {
-
     public static void main(String[] args) {
-        System.out.println("****************************************");
-        System.out.println("   BOOK MY STAY - Request Intake System ");
-        System.out.println("****************************************\n");
+        System.out.println("========================================");
+        System.out.println("      BOOK MY STAY - VERSION 1.6       ");
+        System.out.println("========================================\n");
 
-        BookingQueue bookingQueue = new BookingQueue();
+        BookingSystem system = new BookingSystem();
 
-        // Simulate multiple guests submitting requests at the same time
-        System.out.println("Incoming Requests...");
-        bookingQueue.submitRequest(new ReservationRequest("Alice", "Single"));
-        bookingQueue.submitRequest(new ReservationRequest("Bob", "Double"));
-        bookingQueue.submitRequest(new ReservationRequest("Charlie", "Single"));
+        // Setup
+        Room single = new SingleRoom();
+        system.addInventory(single, 1); // Only 1 single room available
 
-        // Display the queue state to show arrival order preserved
-        bookingQueue.displayQueue();
+        // Use Case 5: Preserve Arrival Order (Alice then Bob)
+        system.enqueueRequest(new ReservationRequest("Alice", "Single"));
+        system.enqueueRequest(new ReservationRequest("Bob", "Single"));
 
-        // Demonstrate processing the first request in the queue
-        System.out.println("\n[System] Ready to process the earliest request...");
-        ReservationRequest next = bookingQueue.processNext();
-        System.out.println("Processing: " + next);
+        // Use Case 6: Safe Allocation
+        system.processNextBooking(); // Alice gets the room
+        system.processNextBooking(); // Bob fails (Inventory consistent)
 
-        // Show remaining queue
-        bookingQueue.displayQueue();
-
-        System.out.println("\nApplication state preserved. No inventory mutation occurred.");
+        system.displayStatus();
+        System.out.println("\nThank you for using Book My Stay!");
     }
 }
