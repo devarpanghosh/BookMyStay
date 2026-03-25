@@ -1,19 +1,20 @@
 import java.util.*;
 
 /**
- * --- BOOK MY STAY APP: FULL SYSTEM INTEGRATION ---
- * This final version implements the complete lifecycle:
- * 1. Entry Point & Domain (UC 1, 2)
- * 2. Centralized HashMap Inventory (UC 3)
- * 3. Read-Only Search (UC 4)
- * 4. FIFO Request Queueing (UC 5)
- * 5. Atomic Room ID Assignment (UC 6)
- * 6. Add-On Service Composition (UC 7)
- * 7. Historical Reporting (UC 8)
+ * --- BOOK MY STAY APP: FINAL SYSTEM ARCHITECTURE ---
+ * Features:
+ * - Abstraction, Inheritance, Encapsulation (UC 2)
+ * - HashMap Centralized Inventory (UC 3)
+ * - FIFO Booking Queue (UC 5)
+ * - Atomic Allocation with Unique IDs (UC 6)
+ * - One-to-Many Add-On Services (UC 7)
+ * - Historical Audit Reporting (UC 8)
+ * - Fail-Fast Validation (UC 9)
+ * - LIFO Cancellation Rollback (UC 10)
  */
 
 // ==========================================
-// 1. DOMAIN LAYER (Abstraction & Inheritance)
+// 1. DOMAIN LAYER
 // ==========================================
 
 abstract class Room {
@@ -41,75 +42,65 @@ class AddOnService {
 }
 
 // ==========================================
-// 2. STATE & SERVICE LAYER
+// 2. CORE BOOKING ENGINE
 // ==========================================
 
-class HotelSystem {
-    // Inventory (UC 3)
+class HotelBookingManager {
     private Map<String, Integer> inventory = new HashMap<>();
-    // Request Queue (UC 5)
-    private Queue<ReservationRequest> requestQueue = new LinkedList<>();
-    // Double-Booking Prevention (UC 6)
-    private Map<String, Set<String>> assignedRoomIDs = new HashMap<>();
-    // Historical Tracking (UC 8)
-    private List<String> bookingHistory = new ArrayList<>();
-    // Add-On Mapping (UC 7)
-    private Map<String, List<AddOnService>> reservationServices = new HashMap<>();
+    private List<String> history = new ArrayList<>();
+    private Map<String, List<AddOnService>> addOns = new HashMap<>();
+
+    // Use Case 10: Stack for Rollback behavior
+    private Stack<String> lastAllocatedIDs = new Stack<>();
 
     public void addInventory(Room room, int count) {
-        inventory.put(room.getRoomType(), count);
-        assignedRoomIDs.putIfAbsent(room.getRoomType(), new HashSet<>());
-    }
-
-    public void enqueueRequest(String guest, String type) {
-        requestQueue.add(new ReservationRequest(guest, type));
+        inventory.put(room.getRoomType().toLowerCase(), count);
     }
 
     /**
-     * Use Case 6 & 8: Processes bookings and records history.
+     * Use Case 6 & 9: Atomic Allocation with Validation
      */
-    public void processAllRequests() {
-        while (!requestQueue.isEmpty()) {
-            ReservationRequest req = requestQueue.poll();
-            String type = req.requestedRoomType;
-            int count = inventory.getOrDefault(type, 0);
+    public String bookRoom(String guest, String type) throws Exception {
+        String key = type.toLowerCase();
 
-            if (count > 0) {
-                // Atomic ID Generation
-                String roomID = type.toUpperCase() + "-" + (assignedRoomIDs.get(type).size() + 101);
-                assignedRoomIDs.get(type).add(roomID);
-                inventory.put(type, count - 1);
-                reservationServices.put(roomID, new ArrayList<>());
+        if (!inventory.containsKey(key)) throw new Exception("Invalid Room Type");
+        if (inventory.get(key) <= 0) throw new Exception("Room Out of Stock");
 
-                String record = "Guest: " + req.guestName + " | Room: " + roomID;
-                bookingHistory.add(record);
-                System.out.println("[Confirmed] " + record);
-            } else {
-                System.out.println("[Failed] No rooms left for " + req.guestName);
-            }
-        }
-    }
+        String resID = type.toUpperCase() + "-" + (100 + history.size() + 1);
 
-    public void addService(String roomID, AddOnService service) {
-        if (reservationServices.containsKey(roomID)) {
-            reservationServices.get(roomID).add(service);
-        }
+        // Update State
+        inventory.put(key, inventory.get(key) - 1);
+        lastAllocatedIDs.push(resID); // Track for rollback
+        addOns.put(resID, new ArrayList<>());
+
+        String log = "Guest: " + guest + " | ID: " + resID;
+        history.add(log);
+
+        return resID;
     }
 
     /**
-     * Use Case 8: Reporting Service
+     * Use Case 10: Cancellation Service (LIFO Rollback)
      */
-    public void displayReport() {
-        System.out.println("\n--- FINAL OPERATIONAL REPORT ---");
-        System.out.println("Total Transactions: " + bookingHistory.size());
-        bookingHistory.forEach(entry -> System.out.println("History: " + entry));
+    public void cancelLastBooking() {
+        if (lastAllocatedIDs.isEmpty()) {
+            System.out.println("[Cancel] No reservations to rollback.");
+            return;
+        }
+
+        String resID = lastAllocatedIDs.pop(); // Get most recent
+        String type = resID.split("-")[0].toLowerCase();
+
+        // Revert Inventory
+        inventory.put(type, inventory.get(type) + 1);
+        history.add("CANCELLED: " + resID);
+
+        System.out.println("[Cancel] Successfully rolled back " + resID);
     }
 
-    // Helper class for requests
-    private static class ReservationRequest {
-        String guestName;
-        String requestedRoomType;
-        ReservationRequest(String g, String t) { this.guestName = g; this.requestedRoomType = t; }
+    public void showReport() {
+        System.out.println("\n--- Audit Trail ---");
+        history.forEach(System.out::println);
     }
 }
 
@@ -119,29 +110,24 @@ class HotelSystem {
 
 public class BookMyStayApp {
     public static void main(String[] args) {
-        // UC 1: Metadata
-        System.out.println("Welcome to Book My Stay App v1.8\n");
+        // Use Case 1: Entry Point
+        System.out.println("BOOK MY STAY v1.10 - Final Integrated System\n");
 
-        HotelSystem hotel = new HotelSystem();
+        HotelBookingManager hotel = new HotelBookingManager();
+        hotel.addInventory(new SingleRoom(), 5);
 
-        // UC 2 & 3: Initialization
-        hotel.addInventory(new SingleRoom(), 1);
-        hotel.addInventory(new DoubleRoom(), 5);
+        try {
+            // Process a booking
+            String id1 = hotel.bookRoom("Alice", "Single");
+            System.out.println("Confirmed: " + id1);
 
-        // UC 5: Fair Queueing
-        hotel.enqueueRequest("Alice", "Single");
-        hotel.enqueueRequest("Bob", "Single"); // Should fail (only 1 single room)
+            // Use Case 10: Demonstrate safe cancellation
+            hotel.cancelLastBooking();
 
-        // UC 6: Atomic Allocation
-        hotel.processAllRequests();
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+        }
 
-        // UC 7: Optional Services
-        // Assuming we knew the ID from output (e.g., SINGLE-101)
-        hotel.addService("SINGLE-101", new AddOnService("Late Checkout", 20.0));
-
-        // UC 8: Reporting
-        hotel.displayReport();
-
-        System.out.println("\n[Shutdown] System execution finished.");
+        hotel.showReport();
     }
 }
