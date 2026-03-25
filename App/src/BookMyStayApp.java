@@ -1,18 +1,18 @@
 import java.util.HashMap;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * --- BOOK MY STAY APP: FULL INTEGRATION ---
- * This version combines:
- * 1. Application Entry & Metadata (Use Case 1)
- * 2. Room Abstraction & Inheritance (Use Case 2)
- * 3. Centralized Inventory via HashMap (Use Case 3)
- * * @author [Your Name]
- * @version 1.2
+ * --- BOOK MY STAY APP: SEARCH SERVICE INTEGRATION ---
+ * This version introduces:
+ * 1. Read-Only Search Service (Use Case 4)
+ * 2. Defensive Programming (Filtering unavailable rooms)
+ * 3. Separation of Concerns (Search logic isolated from Inventory updates)
  */
 
 // ==========================================
-// 1. DOMAIN LAYER (Abstraction & Inheritance)
+// 1. DOMAIN LAYER
 // ==========================================
 
 abstract class Room {
@@ -29,7 +29,7 @@ abstract class Room {
     public String getRoomType() { return roomType; }
 
     public void displayDetails() {
-        System.out.printf("Type: %-10s | Beds: %d | Price: $%.2f%n",
+        System.out.printf("%-10s | Beds: %d | Price: $%.2f",
                 roomType, numberOfBeds, pricePerNight);
     }
 }
@@ -39,21 +39,19 @@ class DoubleRoom extends Room { public DoubleRoom() { super("Double", 2, 180.0);
 class SuiteRoom  extends Room { public SuiteRoom()  { super("Suite",  4, 350.0); } }
 
 // ==========================================
-// 2. STATE LAYER (Centralized Management)
+// 2. STATE LAYER (Inventory Holder)
 // ==========================================
 
-/**
- * Manages room counts using a HashMap to provide O(1) lookup.
- */
 class RoomInventory {
-    private Map<String, Integer> inventory;
-
-    public RoomInventory() {
-        this.inventory = new HashMap<>();
-    }
+    private Map<String, Integer> inventory = new HashMap<>();
 
     public void registerRoom(Room room, int initialCount) {
         inventory.put(room.getRoomType(), initialCount);
+    }
+
+    // Read-only access for the Search Service
+    public int getCount(String roomType) {
+        return inventory.getOrDefault(roomType, 0);
     }
 
     public void updateAvailability(String roomType, int change) {
@@ -62,56 +60,71 @@ class RoomInventory {
             inventory.put(roomType, Math.max(0, current + change));
         }
     }
+}
 
-    public void showStatus() {
-        System.out.println("\n--- Current Inventory Status ---");
-        inventory.forEach((type, count) ->
-                System.out.println("Room: " + type + " | Available: " + count));
+// ==========================================
+// 3. SERVICE LAYER (Search Service)
+// ==========================================
+
+/**
+ * Handles read-only search requests without modifying system state.
+ */
+class SearchService {
+    /**
+     * Filters and displays only available room types.
+     */
+    public void searchAvailableRooms(List<Room> roomCatalog, RoomInventory inventory) {
+        System.out.println("\n--- SEARCH RESULTS (Available Rooms Only) ---");
+        boolean found = false;
+
+        for (Room room : roomCatalog) {
+            int availableCount = inventory.getCount(room.getRoomType());
+
+            // Validation Logic: Defensive check for availability > 0
+            if (availableCount > 0) {
+                room.displayDetails();
+                System.out.println(" | Available: " + availableCount);
+                found = true;
+            }
+        }
+
+        if (!found) {
+            System.out.println("Sorry, no rooms are currently available.");
+        }
+        System.out.println("----------------------------------------------");
     }
 }
 
 // ==========================================
-// 3. APPLICATION ENTRY POINT
+// 4. APPLICATION ENTRY POINT
 // ==========================================
 
 public class BookMyStayApp {
 
     public static void main(String[] args) {
-        // --- Use Case 1: Welcome Message ---
-        System.out.println("****************************************");
-        System.out.println("   Welcome to BOOK MY STAY v1.2         ");
-        System.out.println("   Hotel Management System Initialized  ");
-        System.out.println("****************************************\n");
+        // Initialization
+        System.out.println("Welcome to BOOK MY STAY v1.3\n");
 
-        // --- Use Case 2: Object Initialization ---
-        Room single = new SingleRoom();
-        Room doubleRm = new DoubleRoom();
-        Room suite = new SuiteRoom();
-
-        // --- Use Case 3: Inventory Setup ---
         RoomInventory hotelInventory = new RoomInventory();
+        SearchService searchService = new SearchService();
 
-        // Registering room types into the Centralized HashMap
-        hotelInventory.registerRoom(single, 10);
-        hotelInventory.registerRoom(doubleRm, 5);
-        hotelInventory.registerRoom(suite, 2);
+        // Setup Catalog and Inventory
+        List<Room> roomCatalog = new ArrayList<>();
+        roomCatalog.add(new SingleRoom());
+        roomCatalog.add(new DoubleRoom());
+        roomCatalog.add(new SuiteRoom());
 
-        // Display Room Specs
-        System.out.println("Available Room Types:");
-        single.displayDetails();
-        doubleRm.displayDetails();
-        suite.displayDetails();
+        hotelInventory.registerRoom(roomCatalog.get(0), 5); // 5 Single Rooms
+        hotelInventory.registerRoom(roomCatalog.get(1), 0); // 0 Double Rooms (Sold Out)
+        hotelInventory.registerRoom(roomCatalog.get(2), 2); // 2 Suite Rooms
 
-        // Show Initial Inventory
-        hotelInventory.showStatus();
+        // --- GUEST INTERACTION ---
+        System.out.println("[Guest] Initiating room search...");
 
-        // Simulate a Transaction (Booking)
-        System.out.println("\n[Action] Processing booking for 1 Suite...");
-        hotelInventory.updateAvailability("Suite", -1);
+        // This operation is Read-Only; system state remains unchanged
+        searchService.searchAvailableRooms(roomCatalog, hotelInventory);
 
-        // Show Updated Inventory
-        hotelInventory.showStatus();
-
-        System.out.println("\nApplication execution finished successfully.");
+        // Verification: The Double room was hidden because count was 0
+        System.out.println("\nSearch complete. System state remains consistent.");
     }
 }
